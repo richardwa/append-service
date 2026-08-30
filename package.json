@@ -1,0 +1,28 @@
+{
+  "name": "append-service",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "format": "prettier -w package.json tsconfig.json src",
+    "prebuild": "npm run format",
+    "build": "tsc",
+    "start": "tsx src/server.ts",
+    "start:dist": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^25.5.2",
+    "@types/pg": "^8.15.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "mqtt": "^5.10.0",
+    "pg": "^8.16.0"
+  }
+}
