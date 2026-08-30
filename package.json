@@ -7,14 +7,19 @@
     "format": "prettier -w package.json tsconfig.json src",
     "prebuild": "npm run format",
     "build": "tsc",
-    "start": "tsx src/server.ts",
-    "start:dist": "node dist/server.js",
+    "start": "node dist/server.js",
+    "dev": "DB_MODE=memory tsx src/server.ts",
+    "test": "DB_MODE=memory node --import tsx --test src/db.test.ts",
+    "broker": "node scripts/local-broker.mjs",
+    "test:mqtt": "node scripts/simulate-tasmota.mjs",
+    "test:http": "node scripts/send-temperature.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^25.5.2",
     "@types/pg": "^8.15.0",
+    "aedes": "^1.1.1",
     "prettier": "^3.6.2",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3"
@@ -23,6 +28,7 @@
     "dotenv": "^17.2.0",
     "express": "^5.1.0",
     "mqtt": "^5.10.0",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "pg-mem": "^3.0.14"
   }
 }

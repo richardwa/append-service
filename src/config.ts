@@ -15,8 +15,26 @@ function envInt(name: string, fallback: number): number {
   return parsed;
 }
 
+function envEnum<T extends string>(
+  name: string,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  const value = process.env[name];
+  if (value === undefined || value === "") return fallback;
+  if ((allowed as readonly string[]).includes(value)) return value as T;
+  throw new Error(
+    `Invalid value for ${name}: ${value} (expected one of ${allowed.join("|")})`,
+  );
+}
+
 export const config = {
-  port: envInt("PORT", 3000),
+  port: envInt("PORT", 8401),
+
+  db: {
+    // "postgres" = real database, "memory" = embedded pg-mem (dev/testing)
+    mode: envEnum("DB_MODE", ["postgres", "memory"] as const, "postgres"),
+  },
 
   postgres: {
     host: envString("PGHOST", "localhost"),

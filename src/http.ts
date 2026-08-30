@@ -1,10 +1,31 @@
-import express, { type Request, type Response } from "express";
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import { config } from "./config.js";
 import { insertMessage, insertMessages, query } from "./db.js";
 import type { IncomingMessage, MessageSource, StoredMessage } from "./types.js";
 
 const app = express();
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    console.log(
+      `[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - start}ms`,
+    );
+  });
+  next();
+});
+
 app.use(express.json({ limit: "1mb" }));
+
+const APP_NAME = "append-service";
+
+app.get("/", (_req: Request, res: Response) => {
+  res.json({ app: APP_NAME, status: "ok" });
+});
 
 interface HealthRow {
   ok: boolean;
