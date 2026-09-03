@@ -51,6 +51,14 @@ export const config = {
     // The service embeds its own MQTT broker (aedes); this is the port
     // devices connect to.
     port: envInt("MQTT_PORT", 1883),
+    // Topic filters (comma-separated, MQTT wildcards + and # allowed).
+    // Only published messages matching at least one filter are persisted;
+    // every other MQTT message is ignored. Default collects the Tasmota
+    // power telemetry (tele/<device>/SENSOR) and nothing else.
+    topics: envString("MQTT_TOPICS", "tele/+/SENSOR")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0),
   },
 } as const;
 

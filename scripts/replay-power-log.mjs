@@ -9,7 +9,7 @@
 //   node scripts/replay-power-log.mjs --skip 100 --count 5     # window into the log
 //   node scripts/replay-power-log.mjs --interval 1             # 1s between messages, loop
 //
-// Env: MQTT_URL (default mqtt://localhost:1883), POWER_LOG (default ../power-2026-08-19.log)
+// Env: MQTT_URL (default mqtt://localhost:1883), POWER_LOG (default ../power-sample.log)
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,7 +24,7 @@ function argValue(flag, fallback) {
 }
 
 const url = process.env.MQTT_URL ?? "mqtt://localhost:1883";
-const logFile = process.env.POWER_LOG ?? path.resolve(import.meta.dirname, "..", "..", "power-2026-08-19.log");
+const logFile = process.env.POWER_LOG ?? path.resolve(import.meta.dirname, "..", "power-sample.log");
 const intervalSec = Number(argValue("--interval", 0)); // 0 = as fast as possible
 const delayMs = intervalSec > 0 ? intervalSec * 1000 : 0;
 let count = Number(argValue("--count", Infinity)); // max messages to publish
