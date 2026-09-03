@@ -39,19 +39,18 @@ export const config = {
   postgres: {
     host: envString("PGHOST", "localhost"),
     port: envInt("PGPORT", 5432),
-    database: envString("PGDATABASE", "messages"),
-    user: envString("PGUSER", "postgres"),
-    password: envString("PGPASSWORD", "postgres"),
+    database: envString("PGDATABASE", "home"),
+    user: envString("PGUSER", "sensors_rw"),
+    password: envString("PGPASSWORD", "CHANGE_ME_RW"),
+    // Schema the messages table lives in. In postgres mode the table (and
+    // grants) are owned by the my-db init scripts; this service only appends.
+    schema: envString("PGSCHEMA", "sensors"),
   },
 
   mqtt: {
-    url: envString("MQTT_URL", "mqtt://localhost:1883"),
-    username: process.env.MQTT_USERNAME,
-    password: process.env.MQTT_PASSWORD,
-    clientId: envString("MQTT_CLIENT_ID", "append-service"),
-    // Topic filter to subscribe to; "#" receives everything.
-    topicFilter: envString("MQTT_TOPIC", "#"),
-    qos: envInt("MQTT_QOS", 1) as 0 | 1 | 2,
+    // The service embeds its own MQTT broker (aedes); this is the port
+    // devices connect to.
+    port: envInt("MQTT_PORT", 1883),
   },
 } as const;
 

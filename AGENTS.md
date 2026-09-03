@@ -5,8 +5,8 @@
 **append-service** is a Node.js (TypeScript) service that ingests messages from two
 sources and persists them to PostgreSQL:
 
-1. **MQTT** — connects to an MQTT broker, subscribes to a configurable topic filter
-   (default `#`, i.e. everything), and writes every received message to the database.
+1. **MQTT** — the service **is** the MQTT broker (embedded `aedes`): devices
+   connect to it directly and every published message is written to the database.
 2. **HTTP** — an Express API for writing messages programmatically and reading
    stored messages back.
 
@@ -18,7 +18,7 @@ is ever dropped.
 
 - **Runtime:** Node.js (ES modules), TypeScript (strict)
 - **HTTP:** Express 5
-- **MQTT:** `mqtt` (MQTT.js) package
+- **MQTT:** `aedes` embedded broker (the `mqtt` package is only used by the simulator scripts)
 - **Database:** PostgreSQL via `pg` (connection pool)
 - **Dev/testing DB:** `pg-mem` embedded in-memory Postgres (no services needed)
 - **Dev tooling:** `tsx` for dev running, `tsc` for builds, `node:test` for tests,
@@ -31,16 +31,15 @@ src/
   server.ts   Entry point: wires everything together, graceful shutdown
   config.ts   Env-var configuration with defaults (no config => localhost services)
   http.ts     Express app: write/read endpoints
-  mqtt.ts     MQTT client: subscribe + persist incoming messages
+  broker.ts   Embedded MQTT broker (aedes): listen + persist published messages
   db.ts       pg pool, insert helpers (single + transactional batch)
   types.ts    Shared types (IncomingMessage, StoredMessage, MessageSource)
 scripts/
   init.sql       Schema (messages table + indexes), applied idempotently on boot
   init-db.sh     Creates the database and applies init.sql (optional now)
-  local-broker.mjs       Embedded MQTT broker (aedes) for local testing
   simulate-tasmota.mjs   MQTT simulator: Tasmota power meter (tele/tasmota_<id>/SENSOR)
   send-temperature.mjs   HTTP simulator: temperature/humidity readings via POST /messages
-.env.example  Template for environment configuration
+env.example  Template for environment configuration
 ```
 
 ## Data model
@@ -75,21 +74,16 @@ all DDL uses `IF NOT EXISTS`).
 
 | Variable         | Default                  | Purpose                         |
 | ---------------- | ------------------------ | ------------------------------- |
-| `PORT`           | `3000`                   | HTTP port                       |
+| `PORT`           | `8401`                   | HTTP listener port              |
+| `MQTT_PORT`      | `1883`                   | Embedded MQTT broker listener port |
 | `DB_MODE`        | `postgres`               | `postgres` or `memory` (pg-mem) |
 | `PGHOST`         | `localhost`              | Postgres host                   |
 | `PGPORT`         | `5432`                   | Postgres port                 |
 | `PGDATABASE`     | `messages`               | Postgres database             |
 | `PGUSER`         | `postgres`               | Postgres user                 |
 | `PGPASSWORD`     | `postgres`               | Postgres password             |
-| `MQTT_URL`       | `mqtt://localhost:1883`  | Broker URL (`mqtts://` works) |
-| `MQTT_USERNAME`  | unset                    | Broker username               |
-| `MQTT_PASSWORD`  | unset                    | Broker password               |
-| `MQTT_CLIENT_ID` | `append-service`         | MQTT client id                |
-| `MQTT_TOPIC`     | `#`                      | Subscription topic filter     |
-| `MQTT_QOS`       | `1`                      | Subscription QoS              |
 
-Copy `.env.example` to `.env` to override; everything defaults to local services.
+Copy `env.example` to `.env` to override; everything defaults to local services.
 
 ## Running / testing
 
@@ -107,12 +101,13 @@ Notes:
   lost on restart — that is the point.
 - `npm run init-db` is **optional** now (the server creates tables on boot);
   it is still useful to create the database/user ahead of time in prod.
-- The MQTT client auto-reconnects every 5 s, and MQTT persistence failures
-  are logged per-message without crashing the process. SIGINT/SIGTERM
-  trigger a graceful shutdown (MQTT disconnect → pool close).
-- **Testing without real services:** `npm run dev` + `npm run broker`
-  (embedded aedes broker) + `npm run test:mqtt` / `npm run test:http`
-  simulators cover both ingestion paths end-to-end. Simulators accept
+- The service runs **two listeners**: the HTTP app on `PORT` and the embedded
+  aedes MQTT broker on `MQTT_PORT`. MQTT persistence failures are logged
+  per-message without crashing the process. SIGINT/SIGTERM trigger a
+  graceful shutdown (broker close → pool close).
+- **Testing without real services:** `npm run dev` + `npm run test:mqtt` /
+  `npm run test:http` simulators cover both ingestion paths end-to-end (the
+  MQTT simulator publishes to the embedded broker). Simulators accept
   `--count N` / `--interval S` and default to a single reading.
 
 ## Development notes for agents
@@ -130,7 +125,7 @@ Notes:
   idempotently on every server start (all DDL must use `IF NOT EXISTS`), so
   adding a table or index there is enough — no separate migration runner.
 - **Error handling convention:** per-message failures are logged and skipped
-  (MQTT keeps consuming); request failures return 4xx/5xx JSON
+  (the broker keeps serving); request failures return 4xx/5xx JSON
   (`{"error": "..."}`). Never let a single bad message crash the process.
 - **Batch inserts** use a single transaction (`insertMessages`) — either all
   messages persist or none.

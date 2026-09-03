@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { config } from "./config.js";
 import { close, initDb, insertMessage, insertMessages, query } from "./db.js";
 
 test(
@@ -41,7 +42,9 @@ test(
       source: string;
       topic: string;
       payload: unknown;
-    }>("SELECT id, source, topic, payload FROM messages ORDER BY id");
+    }>(
+      `SELECT id, source, topic, payload FROM ${config.postgres.schema}.messages ORDER BY id`,
+    );
     assert.equal(result.rows.length, 4);
 
     const temp = result.rows[0];

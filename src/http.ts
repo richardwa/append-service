@@ -166,7 +166,7 @@ app.get("/messages", async (req: Request, res: Response) => {
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const sql = `
     SELECT id, source, topic, payload, qos, retained, received_at
-    FROM messages
+    FROM ${config.postgres.schema}.messages
     ${whereClause}
     ORDER BY received_at DESC
     LIMIT $${params.length + 1}

@@ -10,9 +10,9 @@
     "start": "node dist/server.js",
     "dev": "DB_MODE=memory tsx src/server.ts",
     "test": "DB_MODE=memory node --import tsx --test src/db.test.ts",
-    "broker": "node scripts/local-broker.mjs",
     "test:mqtt": "node scripts/simulate-tasmota.mjs",
     "test:http": "node scripts/send-temperature.mjs",
+    "test:replay": "node scripts/replay-power-log.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -37,6 +37,7 @@ export async function initDb(): Promise<void> {
     const PgAdapter = mem.adapters.createPg();
     pool = new PgAdapter.Pool() as unknown as pg.Pool;
     console.log("[db] using embedded in-memory postgres (pg-mem)");
+    await applySchema();
   } else {
     const real = new pg.Pool({
       host: config.postgres.host,
@@ -54,9 +55,12 @@ export async function initDb(): Promise<void> {
     console.log(
       `[db] using postgres at ${config.postgres.host}:${config.postgres.port}/${config.postgres.database}`,
     );
+    // In postgres mode the schema is owned by the my-db deployment init
+    // scripts (this user has no CREATE privilege); nothing to apply here.
+    console.log(
+      `[db] schema ${config.postgres.schema}.messages assumed to exist (managed by my-db init)`,
+    );
   }
-
-  await applySchema();
 }
 
 /** Apply scripts/init.sql. Statements are executed one-by-one so the file also works with pg-mem. */
@@ -84,7 +88,7 @@ export async function query<T extends pg.QueryResultRow>(
 }
 
 const INSERT_SQL = `
-  INSERT INTO messages (source, topic, payload, qos, retained)
+  INSERT INTO ${config.postgres.schema}.messages (source, topic, payload, qos, retained)
   VALUES ($1, $2, $3, $4, $5)
   RETURNING id, received_at
 `;
