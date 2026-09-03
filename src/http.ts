@@ -11,10 +11,20 @@ const app = express();
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
+  let finished = false;
   res.on("finish", () => {
+    finished = true;
     console.log(
       `[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - start}ms`,
     );
+  });
+  // clients that hang up mid-request never emit "finish" — log those too
+  res.on("close", () => {
+    if (!finished) {
+      console.log(
+        `[http] ${req.method} ${req.originalUrl} -> client disconnected after ${Date.now() - start}ms`,
+      );
+    }
   });
   next();
 });

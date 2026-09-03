@@ -80,6 +80,38 @@ async function applySchema(): Promise<void> {
   );
 }
 
+/** Log the row count of every table in the service schema (best effort). */
+export async function logRowCounts(): Promise<void> {
+  try {
+    const schema = config.postgres.schema;
+    let tables = await query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+       ORDER BY table_name`,
+      [schema],
+    );
+    // pg-mem does not populate information_schema; fall back to the known
+    // table set from scripts/init.sql (keep in sync when tables are added).
+    if (tables.rows.length === 0) {
+      tables = { rows: [{ table_name: "messages" }] } as typeof tables;
+    }
+    const counts: string[] = [];
+    for (const { table_name } of tables.rows) {
+      // table names come from the catalog, not user input
+      const result = await query<{ count: string }>(
+        `SELECT count(*) AS count FROM ${schema}.${table_name}`,
+      );
+      const count = result.rows[0]?.count;
+      if (count !== undefined) counts.push(`${schema}.${table_name}=${count}`);
+    }
+    console.log(`[db] row counts: ${counts.join(", ") || "(no tables)"}`);
+  } catch (err) {
+    console.error(
+      `[db] failed to read row counts: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
 export async function query<T extends pg.QueryResultRow>(
   text: string,
   params?: unknown[],

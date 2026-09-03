@@ -1,6 +1,6 @@
 import { startBroker, stopBroker } from "./broker.js";
 import { config } from "./config.js";
-import { initDb, close as closeDb } from "./db.js";
+import { initDb, close as closeDb, logRowCounts } from "./db.js";
 import { startHttp } from "./http.js";
 
 function shutdown(signal: string): void {
@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   // Creates the pool (real postgres or embedded pg-mem) and applies the
   // schema idempotently before accepting any traffic.
   await initDb();
+  await logRowCounts();
 
   const server = startHttp();
   await startBroker();
