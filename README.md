@@ -24,6 +24,9 @@ A TypeScript Node server that ingests messages from **MQTT** and **HTTP** into *
   - `POST /messages` — write one (`{topic, payload, qos?}`)
   - `POST /messages/batch` — atomic multi-write in one transaction
   - `GET /messages` — read with `source`, `topic`, `since`, `limit` filters
+  - `GET /row-counts` — row count of every table in the schema
+  - `GET /:table/list?limit=N` — rows from any schema table (limit 1..1000, default 100)
+  - `GET /:table/count` — row count of one table
   - `GET /health` — 200 if DB reachable, 503 otherwise
 - Payloads parsing as JSON are stored as **JSONB**; anything else is stored as a JSON string scalar so no data is dropped.
 - **Schema is created automatically on server start** (idempotent `IF NOT EXISTS` DDL from `scripts/init.sql`).

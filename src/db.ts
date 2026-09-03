@@ -80,31 +80,88 @@ async function applySchema(): Promise<void> {
   );
 }
 
+export interface TableRowCount {
+  table: string;
+  count: number;
+}
+
+/**
+ * Row count of every table in the service schema, ordered by table name.
+ */
+/**
+ * Names of all tables in the service schema, ordered by name.
+ */
+export async function listTables(): Promise<string[]> {
+  const schema = config.postgres.schema;
+  let tables = await query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+     ORDER BY table_name`,
+    [schema],
+  );
+  // pg-mem does not populate information_schema; fall back to the known
+  // table set from scripts/init.sql (keep in sync when tables are added).
+  if (tables.rows.length === 0) {
+    tables = { rows: [{ table_name: "messages" }] } as typeof tables;
+  }
+  return tables.rows.map((r) => r.table_name);
+}
+
+/**
+ * Row count of every table in the service schema, ordered by table name.
+ */
+export async function getRowCounts(): Promise<TableRowCount[]> {
+  const schema = config.postgres.schema;
+  const counts: TableRowCount[] = [];
+  for (const table of await listTables()) {
+    // table names come from the catalog, not user input
+    const result = await query<{ count: string }>(
+      `SELECT count(*) AS count FROM ${schema}.${table}`,
+    );
+    const raw = result.rows[0]?.count;
+    if (raw !== undefined) counts.push({ table, count: Number(raw) });
+  }
+  return counts;
+}
+
+/**
+ * Count rows in a single table. The caller must have validated `table`
+ * against listTables() — it is interpolated, never parameterized.
+ */
+export async function countTableRows(table: string): Promise<number> {
+  const result = await query<{ count: string }>(
+    `SELECT count(*) AS count FROM ${config.postgres.schema}.${table}`,
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+/**
+ * Read rows from a single table (natural table order), capped at `limit`.
+ * The caller must have validated `table` against listTables() — it is
+ * interpolated, never parameterized.
+ */
+export async function listTableRows(
+  table: string,
+  limit: number,
+): Promise<Record<string, unknown>[]> {
+  const result = await query<Record<string, unknown>>(
+    `SELECT * FROM ${config.postgres.schema}.${table} LIMIT $1`,
+    [limit],
+  );
+  return result.rows;
+}
+
 /** Log the row count of every table in the service schema (best effort). */
 export async function logRowCounts(): Promise<void> {
   try {
+    const counts = await getRowCounts();
     const schema = config.postgres.schema;
-    let tables = await query<{ table_name: string }>(
-      `SELECT table_name FROM information_schema.tables
-       WHERE table_schema = $1 AND table_type = 'BASE TABLE'
-       ORDER BY table_name`,
-      [schema],
+    console.log(
+      `[db] row counts: ${
+        counts.map((c) => `${schema}.${c.table}=${c.count}`).join(", ") ||
+        "(no tables)"
+      }`,
     );
-    // pg-mem does not populate information_schema; fall back to the known
-    // table set from scripts/init.sql (keep in sync when tables are added).
-    if (tables.rows.length === 0) {
-      tables = { rows: [{ table_name: "messages" }] } as typeof tables;
-    }
-    const counts: string[] = [];
-    for (const { table_name } of tables.rows) {
-      // table names come from the catalog, not user input
-      const result = await query<{ count: string }>(
-        `SELECT count(*) AS count FROM ${schema}.${table_name}`,
-      );
-      const count = result.rows[0]?.count;
-      if (count !== undefined) counts.push(`${schema}.${table_name}=${count}`);
-    }
-    console.log(`[db] row counts: ${counts.join(", ") || "(no tables)"}`);
   } catch (err) {
     console.error(
       `[db] failed to read row counts: ${err instanceof Error ? err.message : err}`,

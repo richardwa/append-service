@@ -4,7 +4,15 @@ import express, {
   type Response,
 } from "express";
 import { config } from "./config.js";
-import { insertMessage, insertMessages, query } from "./db.js";
+import {
+  countTableRows,
+  getRowCounts,
+  insertMessage,
+  insertMessages,
+  listTables,
+  listTableRows,
+  query,
+} from "./db.js";
 import type { IncomingMessage, MessageSource, StoredMessage } from "./types.js";
 
 const app = express();
@@ -47,6 +55,20 @@ app.get("/health", async (_req: Request, res: Response) => {
     res.json({ status: "ok" });
   } catch {
     res.status(503).json({ status: "degraded", database: "unreachable" });
+  }
+});
+
+app.get("/row-counts", async (_req: Request, res: Response) => {
+  try {
+    const counts = await getRowCounts();
+    res.json({
+      schema: config.postgres.schema,
+      tables: counts,
+      total: counts.reduce((sum, c) => sum + c.count, 0),
+    });
+  } catch (err) {
+    console.error("[http] failed to read row counts:", err);
+    res.status(500).json({ error: "failed to read row counts" });
   }
 });
 
@@ -160,17 +182,8 @@ app.get("/messages", async (req: Request, res: Response) => {
     conditions.push(`received_at >= $${params.length}`);
   }
 
-  let limit = 100;
-  if (q.limit !== undefined) {
-    const parsed = Number.parseInt(String(q.limit), 10);
-    if (Number.isNaN(parsed) || parsed < 1 || parsed > 1000) {
-      res
-        .status(400)
-        .json({ error: '"limit" must be an integer between 1 and 1000' });
-      return;
-    }
-    limit = parsed;
-  }
+  const limit = parseLimit(q.limit, res);
+  if (limit === null) return;
 
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -189,6 +202,61 @@ app.get("/messages", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("[http] failed to list messages:", err);
     res.status(500).json({ error: "failed to list messages" });
+  }
+});
+
+/**
+ * Shared limit parsing for list endpoints: integer 1..1000, default 100.
+ * Returns the parsed limit, or null after responding with 400.
+ */
+function parseLimit(raw: unknown, res: Response): number | null {
+  if (raw === undefined) return 100;
+  const parsed = Number.parseInt(String(raw), 10);
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 1000) {
+    res
+      .status(400)
+      .json({ error: '"limit" must be an integer between 1 and 1000' });
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Per-table read endpoints. The table name comes from the URL, so it is
+ * validated against the actual tables in the service schema (404 if unknown)
+ * before being used in SQL.
+ */
+app.get("/:table/list", async (req: Request, res: Response) => {
+  const table = String(req.params.table);
+  if (!(await listTables()).includes(table)) {
+    res.status(404).json({ error: `unknown table: ${table}` });
+    return;
+  }
+  const limit = parseLimit(req.query.limit, res);
+  if (limit === null) return;
+
+  try {
+    const rows = await listTableRows(table, limit);
+    res.json({ table, count: rows.length, limit, rows });
+  } catch (err) {
+    console.error(`[http] failed to list table ${table}:`, err);
+    res.status(500).json({ error: `failed to list table ${table}` });
+  }
+});
+
+app.get("/:table/count", async (req: Request, res: Response) => {
+  const table = String(req.params.table);
+  if (!(await listTables()).includes(table)) {
+    res.status(404).json({ error: `unknown table: ${table}` });
+    return;
+  }
+
+  try {
+    const count = await countTableRows(table);
+    res.json({ table, count });
+  } catch (err) {
+    console.error(`[http] failed to count table ${table}:`, err);
+    res.status(500).json({ error: `failed to count table ${table}` });
   }
 });
 

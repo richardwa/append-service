@@ -69,6 +69,13 @@ all DDL uses `IF NOT EXISTS`).
 - `POST /messages/batch` — write many messages atomically. Body: `{"messages": [{"topic", "payload"}, ...]}` → `201 {"inserted": n}`.
 - `GET /messages` — list newest first. Query params: `source=mqtt|http`, `topic=...`,
   `since=<ISO 8601>`, `limit=1..1000` (default 100).
+- `GET /row-counts` — row count of every table in the service schema.
+  → `{"schema", "tables": [{"table", "count"}...], "total"}`.
+- `GET /:table/list?limit=N` — rows from any table in the schema (e.g.
+  `/messages/list?limit=10`). `limit` 1..1000, default 100. 404 for unknown
+  tables (the name is whitelist-validated against the schema before use).
+  → `{"table", "count": <rows returned>, "limit", "rows": [...]}`.
+- `GET /:table/count` — row count of one table. → `{"table", "count"}`.
 
 ## Configuration (environment variables)
 

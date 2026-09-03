@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { config } from "./config.js";
-import { close, initDb, insertMessage, insertMessages, query } from "./db.js";
+import {
+  close,
+  countTableRows,
+  getRowCounts,
+  initDb,
+  insertMessage,
+  insertMessages,
+  listTables,
+  listTableRows,
+  query,
+} from "./db.js";
 
 test(
   "in-memory db: schema init, insert, batch, read-back",
@@ -62,5 +72,27 @@ test(
 
     // Empty batch is a no-op
     assert.equal(await insertMessages([]), 0);
+
+    // Row counts reflect the inserts (4 messages in one table)
+    const counts = await getRowCounts();
+    assert.ok(counts.length >= 1);
+    const messages = counts.find((c) => c.table === "messages");
+    assert.ok(messages);
+    assert.equal(messages.count, 4);
+
+    // Per-table helpers back the generic /:table/count and /:table/list routes
+    assert.deepEqual(await listTables(), ["messages"]);
+    assert.equal(await countTableRows("messages"), 4);
+    const rows = await listTableRows("messages", 2);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(Object.keys(rows[0] as Record<string, unknown>).sort(), [
+      "id",
+      "payload",
+      "qos",
+      "received_at",
+      "retained",
+      "source",
+      "topic",
+    ]);
   },
 );
