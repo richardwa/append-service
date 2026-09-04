@@ -31,6 +31,10 @@ function envEnum<T extends string>(
 export const config = {
   port: envInt("PORT", 8401),
 
+  // Log verbosity: "debug" enables request-body logging for MQTT and HTTP
+  // messages; "info" (default) only logs connections, requests and errors.
+  logLevel: envEnum("LOG_LEVEL", ["debug", "info", "warn", "error"] as const, "info"),
+
   db: {
     // "postgres" = real database, "memory" = embedded pg-mem (dev/testing)
     mode: envEnum("DB_MODE", ["postgres", "memory"] as const, "postgres"),

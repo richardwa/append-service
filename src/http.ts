@@ -14,6 +14,7 @@ import {
   query,
 } from "./db.js";
 import type { IncomingMessage, MessageSource, StoredMessage } from "./types.js";
+import { debugLog } from "./log.js";
 
 const app = express();
 
@@ -80,6 +81,7 @@ interface WriteBody {
 
 app.post("/messages", async (req: Request, res: Response) => {
   const body = req.body as WriteBody;
+  debugLog(`[http] message body: ${JSON.stringify(body)}`);
   if (typeof body.topic !== "string" || body.topic.length === 0) {
     res.status(400).json({ error: '"topic" (string) is required' });
     return;
@@ -111,6 +113,7 @@ interface BatchBody {
 
 app.post("/messages/batch", async (req: Request, res: Response) => {
   const body = req.body as BatchBody;
+  debugLog(`[http] message body (batch): ${JSON.stringify(body)}`);
   if (!Array.isArray(body.messages)) {
     res.status(400).json({ error: '"messages" (array) is required' });
     return;

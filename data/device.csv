@@ -1,0 +1,11 @@
+id,name,type,external_id,location,created_at
+8,SwitchBot1,SwitchBot,DD:42:05:86:36:8A,3rd floor,2026-08-12 02:05:11.952058+00
+9,SwitchBot2,SwitchBot,DD:42:05:86:3F:75,outdoor,2026-08-12 02:05:11.952058+00
+10,SwitchBot3,SwitchBot,D6:34:C5:86:21:14,basement,2026-08-12 02:05:11.952058+00
+1,Sonoff1,Sonoff,08:F9:E0:63:B9:2D,Albert,2026-08-12 01:57:48.128129+00
+2,Sonoff2,Sonoff,08:F9:E0:63:B5:0E,TV,2026-08-12 01:57:48.128129+00
+3,Sonoff3,Sonoff,08:F9:E0:63:B3:AD,Fridge,2026-08-12 01:57:48.128129+00
+4,Sonoff4,Sonoff,C8:C9:A3:36:02:B3,Server,2026-08-12 01:57:48.128129+00
+5,Powermon1,Powermon,DC:4F:22:BF:15:84,Peggy,2026-08-12 01:57:48.128129+00
+6,Powermon2,Powermon,DC:4F:22:BF:67:28,Peladn,2026-08-12 01:57:48.128129+00
+7,Powermon3,Powermon,24:62:AB:4D:51:F4,Richard,2026-08-12 01:57:48.128129+00

@@ -2,6 +2,7 @@ import { Aedes } from "aedes";
 import net from "node:net";
 import { config } from "./config.js";
 import { insertMessage } from "./db.js";
+import { debugLog } from "./log.js";
 
 let broker: Aedes | null = null;
 let server: net.Server | null = null;
@@ -59,6 +60,9 @@ export async function startBroker(): Promise<net.Server> {
       console.log(`[mqtt] ignored (no filter match): ${packet.topic}`);
       return;
     }
+    debugLog(
+      `[mqtt] message body: ${packet.topic} -> ${packet.payload.toString("utf8")}`,
+    );
     insertMessage({
       source: "mqtt",
       topic: packet.topic,
