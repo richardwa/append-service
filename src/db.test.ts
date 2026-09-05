@@ -4,10 +4,14 @@ import { config } from "./config.js";
 import {
   close,
   countTableRows,
+  getDeviceIdByLocation,
+  getDeviceIdByMac,
   getRowCounts,
   initDb,
   insertMessage,
   insertMessages,
+  insertPowerReading,
+  insertSwitchbotReading,
   listTables,
   listTableRows,
   query,
@@ -81,7 +85,13 @@ test(
     assert.equal(messages.count, 4);
 
     // Per-table helpers back the generic /:table/count and /:table/list routes
-    assert.deepEqual(await listTables(), ["messages"]);
+    assert.deepEqual(await listTables(), [
+      "messages",
+      "device",
+      "temperature",
+      "humidity",
+      "power",
+    ]);
     assert.equal(await countTableRows("messages"), 4);
     const rows = await listTableRows("messages", 2);
     assert.equal(rows.length, 2);
@@ -94,5 +104,93 @@ test(
       "source",
       "topic",
     ]);
+  },
+);
+
+test(
+  "switchbot reading: mac lookup gates insert into temperature/humidity",
+  { timeout: 15_000 },
+  async (t) => {
+    await initDb();
+    t.after(() => close());
+    const schema = config.postgres.schema;
+
+    // Register one device like the production device table does
+    await query(
+      `INSERT INTO ${config.postgres.schema}.device (name, type, external_id)
+       VALUES ('SwitchBot1', 'SwitchBot', 'DD:42:05:86:36:8A')`,
+    );
+
+    // Unknown MAC => lookup returns null, nothing inserted
+    assert.equal(await getDeviceIdByMac("11:22:33:44:55:66"), null);
+
+    // Known MAC (case-insensitive) => device id resolved
+    const deviceId = await getDeviceIdByMac("dd:42:05:86:36:8a");
+    assert.ok(deviceId);
+
+    // Insert a reading with both temperature and humidity
+    const result = await insertSwitchbotReading(deviceId!, {
+      temperatureC: 21.3,
+      humidity: 47,
+    });
+    assert.equal(result.temperature, true);
+    assert.equal(result.humidity, true);
+
+    // Temperature-only reading also works
+    const tempOnly = await insertSwitchbotReading(deviceId!, {
+      temperatureC: 22.5,
+    });
+    assert.equal(tempOnly.temperature, true);
+    assert.equal(tempOnly.humidity, false);
+
+    const temps = await query<{ value_c: number }>(
+      `SELECT value_c FROM ${config.postgres.schema}.temperature
+       WHERE device_id = $1 ORDER BY time`,
+      [deviceId],
+    );
+    assert.deepEqual(
+      temps.rows.map((r) => r.value_c),
+      [21.3, 22.5],
+    );
+
+    const hums = await query<{ value_pct: number }>(
+      `SELECT value_pct FROM ${config.postgres.schema}.humidity
+       WHERE device_id = $1`,
+      [deviceId],
+    );
+    assert.deepEqual(
+      hums.rows.map((r) => r.value_pct),
+      [47],
+    );
+  },
+);
+
+test(
+  "mqtt power reading: location lookup gates insert into power",
+  { timeout: 15_000 },
+  async (t) => {
+    await initDb();
+    t.after(() => close());
+    const schema = config.postgres.schema;
+
+    await query(
+      `INSERT INTO ${config.postgres.schema}.device (name, type, external_id, location)
+       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert')`,
+    );
+
+    // Case-insensitive location match, like the broker does for tele/Albert/SENSOR
+    const deviceId = await getDeviceIdByLocation("albert");
+    assert.ok(deviceId);
+
+    // Unknown location => null, nothing inserted
+    assert.equal(await getDeviceIdByLocation("tesla"), null);
+
+    await insertPowerReading(deviceId!, 52);
+    const rows = await query<{ device_id: number; watts: number }>(
+      `SELECT device_id, watts FROM ${config.postgres.schema}.power`,
+    );
+    assert.equal(rows.rows.length, 1);
+    assert.equal(Number(rows.rows[0]!.device_id), deviceId);
+    assert.equal(rows.rows[0]!.watts, 52);
   },
 );

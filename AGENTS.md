@@ -14,6 +14,17 @@ Both paths converge on a single `messages` table. String payloads that parse as
 JSON are stored as JSONB; anything else is stored as a JSON string, so no data
 is ever dropped.
 
+Device-gated structured appends: both ingestion paths also look up the source
+device in the existing `device` table (owned by the my-db init scripts) and
+append readings to the existing `temperature`/`humidity`/`power` tables —
+nothing is inserted for unregistered devices:
+
+- `POST /switchbot` — matches `device.external_id` (MAC, case-insensitive);
+  inserts `temperature_c` → `temperature`, `humidity` → `humidity`.
+- MQTT `tele/<location>/SENSOR` — matches `device.location`
+  (case-insensitive); inserts `ENERGY.Power` → `power` (watts). The raw
+  message is still archived in `messages` either way.
+
 ## Tech stack
 
 - **Runtime:** Node.js (ES modules), TypeScript (strict)
@@ -71,6 +82,12 @@ all DDL uses `IF NOT EXISTS`).
   `since=<ISO 8601>`, `limit=1..1000` (default 100).
 - `GET /row-counts` — row count of every table in the service schema.
   → `{"schema", "tables": [{"table", "count"}...], "total"}`.
+- `POST /switchbot` — SwitchBot-scanner readings. Body: `{"mac": "DD:42:05:86:36:8A",
+  "temperature_c"?: n, "humidity"?: n, ...}`. The MAC is looked up (case-insensitive)
+  against `device.external_id`; when the device is registered, `temperature_c`/`humidity`
+  are appended to the existing `temperature`/`humidity` tables keyed by device id
+  (→ `201 {"deviceId", "temperature", "humidity"}`), otherwise nothing is inserted
+  (→ `404 {"error": "unknown device: <mac>"}`).
 - `GET /:table/list?limit=N` — rows from any table in the schema (e.g.
   `/messages/list?limit=10`). `limit` 1..1000, default 100. 404 for unknown
   tables (the name is whitelist-validated against the schema before use).

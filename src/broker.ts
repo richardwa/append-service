@@ -1,7 +1,11 @@
 import { Aedes } from "aedes";
 import net from "node:net";
 import { config } from "./config.js";
-import { insertMessage } from "./db.js";
+import {
+  getDeviceIdByLocation,
+  insertMessage,
+  insertPowerReading,
+} from "./db.js";
 import { debugLog } from "./log.js";
 
 let broker: Aedes | null = null;
@@ -27,6 +31,42 @@ export function topicMatches(topic: string, filter: string): boolean {
 /** True when the topic matches at least one configured persist filter. */
 function shouldPersist(topic: string): boolean {
   return config.mqtt.topics.some((filter) => topicMatches(topic, filter));
+}
+
+/**
+ * Record an ENERGY.Power reading from a persisted MQTT topic into the power
+ * table. The topic's second segment (e.g. "Albert" in tele/Albert/SENSOR) is
+ * matched case-insensitively against device.location; when no device is
+ * registered the reading is skipped (the raw message is still archived in
+ * messages). Failures are logged per-message; the broker keeps serving.
+ */
+async function recordPowerReading(
+  topic: string,
+  payloadText: string,
+): Promise<void> {
+  try {
+    const parsed = JSON.parse(payloadText) as {
+      ENERGY?: { Power?: unknown };
+      Power?: unknown;
+    };
+    const raw = parsed.ENERGY?.Power ?? parsed.Power;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return;
+
+    const location = topic.split("/")[1];
+    if (!location) return;
+    const deviceId = await getDeviceIdByLocation(location);
+    if (deviceId === null) {
+      debugLog(
+        `[mqtt] no device for location "${location}", watts not recorded`,
+      );
+      return;
+    }
+
+    await insertPowerReading(deviceId, raw);
+    debugLog(`[mqtt] power recorded: ${raw} W (device ${deviceId}, ${topic})`);
+  } catch (err) {
+    console.error(`[mqtt] failed to record power for "${topic}":`, err);
+  }
 }
 
 /**
@@ -75,6 +115,7 @@ export async function startBroker(): Promise<net.Server> {
         err,
       );
     });
+    void recordPowerReading(packet.topic, packet.payload.toString("utf8"));
   });
 
   server = net.createServer(aedes.handle);

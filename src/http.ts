@@ -6,9 +6,11 @@ import express, {
 import { config } from "./config.js";
 import {
   countTableRows,
+  getDeviceIdByMac,
   getRowCounts,
   insertMessage,
   insertMessages,
+  insertSwitchbotReading,
   listTables,
   listTableRows,
   query,
@@ -148,6 +150,85 @@ app.post("/messages/batch", async (req: Request, res: Response) => {
     res.status(500).json({ error: "failed to persist batch" });
   }
 });
+
+/**
+ * POST /switchbot — accept a reading from a SwitchBot-scanner device.
+ * Expected body (from the ESP32 scanner):
+ * {
+ *   "uptime_ms": 12345, "mac": "DD:42:05:86:36:8A", "rssi": -60,
+ *   "manufacturer": "0x004c", "temperature_c": 21.3, "temperature_f": 70.3,
+ *   "humidity": 47, "battery": 85
+ * }
+ *
+ * The MAC is looked up against device.external_id (case-insensitive). If a
+ * registered device exists, temperature_c and humidity are appended to the
+ * existing sensors.temperature / sensors.humidity tables keyed by device id;
+ * if the MAC is unknown, nothing is inserted (404).
+ */
+app.post("/switchbot", async (req: Request, res: Response) => {
+  const body = req.body as {
+    mac?: unknown;
+    temperature_c?: unknown;
+    humidity?: unknown;
+  };
+  debugLog(`[http] switchbot body: ${JSON.stringify(body)}`);
+
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    res.status(400).json({ error: "body must be a JSON object" });
+    return;
+  }
+  if (typeof body.mac !== "string" || body.mac.trim().length === 0) {
+    res.status(400).json({ error: '"mac" (string) is required' });
+    return;
+  }
+  const mac = body.mac.trim();
+
+  const temperatureC = parseOptionalNumber(
+    body.temperature_c,
+    "temperature_c",
+    res,
+  );
+  if (temperatureC === null) return;
+  const humidity = parseOptionalNumber(body.humidity, "humidity", res);
+  if (humidity === null) return;
+  if (temperatureC === undefined && humidity === undefined) {
+    res.status(400).json({
+      error: "nothing to insert: provide temperature_c and/or humidity",
+    });
+    return;
+  }
+
+  try {
+    const deviceId = await getDeviceIdByMac(mac);
+    if (deviceId === null) {
+      res.status(404).json({ error: `unknown device: ${mac}` });
+      return;
+    }
+
+    const result = await insertSwitchbotReading(deviceId, {
+      temperatureC,
+      humidity,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    console.error("[http] failed to persist switchbot reading:", err);
+    res.status(500).json({ error: "failed to persist switchbot reading" });
+  }
+});
+
+/** Validate one optional numeric body field; returns null after 400 on bad input. */
+function parseOptionalNumber(
+  raw: unknown,
+  name: string,
+  res: Response,
+): number | undefined | null {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    res.status(400).json({ error: `"${name}" must be a number` });
+    return null;
+  }
+  return raw;
+}
 
 interface ListQuery {
   source?: unknown;

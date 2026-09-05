@@ -102,7 +102,15 @@ export async function listTables(): Promise<string[]> {
   // pg-mem does not populate information_schema; fall back to the known
   // table set from scripts/init.sql (keep in sync when tables are added).
   if (tables.rows.length === 0) {
-    tables = { rows: [{ table_name: "messages" }] } as typeof tables;
+    tables = {
+      rows: [
+        { table_name: "messages" },
+        { table_name: "device" },
+        { table_name: "temperature" },
+        { table_name: "humidity" },
+        { table_name: "power" },
+      ],
+    } as typeof tables;
   }
   return tables.rows.map((r) => r.table_name);
 }
@@ -251,4 +259,103 @@ export async function close(): Promise<void> {
   const p = pool;
   pool = null;
   await p.end();
+}
+
+/**
+ * Look up a device id by MAC address. Matches case-insensitively against
+ * device.external_id (production stores MACs like "DD:42:05:86:36:8A").
+ * Returns null when no device is registered for the MAC.
+ */
+export async function getDeviceIdByMac(mac: string): Promise<number | null> {
+  const result = await query<{ id: string }>(
+    `SELECT id FROM ${config.postgres.schema}.device
+     WHERE upper(external_id) = upper($1)
+     LIMIT 1`,
+    [mac],
+  );
+  const raw = result.rows[0]?.id;
+  return raw === undefined ? null : Number(raw);
+}
+
+/**
+ * Look up a device id by location name (case-insensitive). The MQTT path
+ * uses this: Tasmota publishes to tele/<location>/SENSOR and device.location
+ * holds the same name (e.g. "Albert", stored with any capitalization).
+ * Returns null when no device is registered for the location.
+ */
+export async function getDeviceIdByLocation(
+  location: string,
+): Promise<number | null> {
+  const result = await query<{ id: string }>(
+    `SELECT id FROM ${config.postgres.schema}.device
+     WHERE lower(location) = lower($1)
+     LIMIT 1`,
+    [location],
+  );
+  const raw = result.rows[0]?.id;
+  return raw === undefined ? null : Number(raw);
+}
+
+/**
+ * Append a watts reading to the existing power table, keyed by device id.
+ * Used by the MQTT path for Tasmota ENERGY.Power telemetry.
+ */
+export async function insertPowerReading(
+  deviceId: number,
+  watts: number,
+): Promise<void> {
+  await query(
+    `INSERT INTO ${config.postgres.schema}.power (time, device_id, watts)
+     VALUES (now(), $1, $2)`,
+    [deviceId, watts],
+  );
+}
+
+/** What was persisted for a SwitchBot reading. */
+export interface SwitchbotInsertResult {
+  deviceId: number;
+  temperature: boolean;
+  humidity: boolean;
+}
+
+/**
+ * Append a SwitchBot reading to the existing temperature/humidity tables
+ * (same tables the MQTT path and /messages feed). Each present value becomes
+ * one row keyed by device_id; both inserts happen in a single transaction.
+ * Returns which tables were written.
+ */
+export async function insertSwitchbotReading(
+  deviceId: number,
+  reading: { temperatureC?: number; humidity?: number },
+): Promise<SwitchbotInsertResult> {
+  const schema = config.postgres.schema;
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    let temperature = false;
+    let humidity = false;
+    if (reading.temperatureC !== undefined) {
+      await client.query(
+        `INSERT INTO ${schema}.temperature (time, device_id, value_c)
+         VALUES (now(), $1, $2)`,
+        [deviceId, reading.temperatureC],
+      );
+      temperature = true;
+    }
+    if (reading.humidity !== undefined) {
+      await client.query(
+        `INSERT INTO ${schema}.humidity (time, device_id, value_pct)
+         VALUES (now(), $1, $2)`,
+        [deviceId, reading.humidity],
+      );
+      humidity = true;
+    }
+    await client.query("COMMIT");
+    return { deviceId: Number(deviceId), temperature, humidity };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
