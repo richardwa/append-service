@@ -50,8 +50,9 @@ export const config = {
     database: envString("PGDATABASE", "home"),
     user: envString("PGUSER", "sensors_rw"),
     password: envString("PGPASSWORD", "CHANGE_ME_RW"),
-    // Schema the messages table lives in. In postgres mode the table (and
-    // grants) are owned by the my-db init scripts; this service only appends.
+    // Schema the device/temperature/humidity/power tables live in. In
+    // postgres mode the tables (and grants) are owned by the my-db init
+    // scripts; this service only appends readings.
     schema: envString("PGSCHEMA", "sensors"),
   },
 
@@ -60,9 +61,10 @@ export const config = {
     // devices connect to.
     port: envInt("MQTT_PORT", 1883),
     // Topic filters (comma-separated, MQTT wildcards + and # allowed).
-    // Only published messages matching at least one filter are persisted;
-    // every other MQTT message is ignored. Default collects the Tasmota
-    // power telemetry (tele/<device>/SENSOR) and nothing else.
+    // Only published messages matching at least one filter are processed
+    // (ENERGY.Power recorded into the power table); every other MQTT message
+    // is ignored. Default collects the Tasmota power telemetry
+    // (tele/<device>/SENSOR) and nothing else.
     topics: envString("MQTT_TOPICS", "tele/+/SENSOR")
       .split(",")
       .map((t) => t.trim())

@@ -2,28 +2,25 @@
 
 ## Project description
 
-**append-service** is a Node.js (TypeScript) service that ingests messages from two
-sources and persists them to PostgreSQL:
+**append-service** is a Node.js (TypeScript) service that ingests device readings
+from two sources and persists them to PostgreSQL:
 
 1. **MQTT** — the service **is** the MQTT broker (embedded `aedes`): devices
-   connect to it directly and every published message is written to the database.
-2. **HTTP** — an Express API for writing messages programmatically and reading
-   stored messages back.
+   connect to it directly and power telemetry is extracted from published
+   messages and written to the database.
+2. **HTTP** — an Express API for device-gated reading ingestion and reading
+   stored rows back.
 
-Both paths converge on a single `messages` table. String payloads that parse as
-JSON are stored as JSONB; anything else is stored as a JSON string, so no data
-is ever dropped.
-
-Device-gated structured appends: both ingestion paths also look up the source
-device in the existing `device` table (owned by the my-db init scripts) and
-append readings to the existing `temperature`/`humidity`/`power` tables —
-nothing is inserted for unregistered devices:
+Device-gated structured appends: both ingestion paths look up the source device
+in the existing `device` table (owned by the my-db init scripts) and append
+readings to the existing `temperature`/`humidity`/`power` tables — nothing is
+inserted for unregistered devices:
 
 - `POST /switchbot` — matches `device.external_id` (MAC, case-insensitive);
   inserts `temperature_c` → `temperature`, `humidity` → `humidity`.
 - MQTT `tele/<location>/SENSOR` — matches `device.location`
-  (case-insensitive); inserts `ENERGY.Power` → `power` (watts). The raw
-  message is still archived in `messages` either way.
+  (case-insensitive); inserts `ENERGY.Power` → `power` (watts). Messages that
+  do not match a device (or don't contain `ENERGY.Power`) are ignored.
 
 ## Tech stack
 
@@ -41,71 +38,60 @@ nothing is inserted for unregistered devices:
 src/
   server.ts   Entry point: wires everything together, graceful shutdown
   config.ts   Env-var configuration with defaults (no config => localhost services)
-  http.ts     Express app: write/read endpoints
-  broker.ts   Embedded MQTT broker (aedes): listen + persist published messages
-  db.ts       pg pool, insert helpers (single + transactional batch)
-  types.ts    Shared types (IncomingMessage, StoredMessage, MessageSource)
+  http.ts     Express app: read endpoints + /switchbot ingestion
+  broker.ts   Embedded MQTT broker (aedes): listen + record power telemetry
+  db.ts       pg pool, device lookups, reading insert helpers
 scripts/
-  init.sql       Schema (messages table + indexes), applied idempotently on boot
+  init.sql       Schema (device/temperature/humidity/power tables), applied idempotently on boot
   init-db.sh     Creates the database and applies init.sql (optional now)
   simulate-tasmota.mjs   MQTT simulator: Tasmota power meter (tele/tasmota_<id>/SENSOR)
-  send-temperature.mjs   HTTP simulator: temperature/humidity readings via POST /messages
+  send-temperature.mjs   HTTP simulator: temperature/humidity readings via POST /switchbot
 env.example  Template for environment configuration
 ```
 
 ## Data model
 
-`scripts/init.sql`:
+`scripts/init.sql` (memory-mode mirrors of the production tables):
 
-| Column      | Type        | Notes                                  |
-| ----------- | ----------- | -------------------------------------- |
-| id          | BIGSERIAL   | Primary key                            |
-| source      | TEXT        | `mqtt` or `http` (CHECK constraint)    |
-| topic       | TEXT        | MQTT topic, or client-supplied topic   |
-| payload     | JSONB       | Parsed JSON, or JSON string scalar     |
-| qos         | SMALLINT    | MQTT QoS (0–2), null for HTTP writes   |
-| retained    | BOOLEAN     | MQTT retain flag, false for HTTP       |
-| received_at | TIMESTAMPTZ | Defaults to `now()`                    |
-
-Indexes: `received_at DESC`, `topic`, `source`.
+- `device` — `id`, `name`, `type`, `external_id` (e.g. MAC), `location`, `created_at`
+- `temperature` — `time`, `device_id` (FK), `value_c`
+- `humidity` — `time`, `device_id` (FK), `value_pct`
+- `power` — `time`, `device_id` (FK), `watts`
 
 The schema is applied **automatically and idempotently on server start**
 (`initDb()` in `src/db.ts` reads `scripts/init.sql` and runs each statement;
-all DDL uses `IF NOT EXISTS`).
+all DDL uses `IF NOT EXISTS`). In postgres mode the tables are owned by the
+my-db init scripts and this file is not applied.
 
 ## API
 
 - `GET /health` — 200 if the DB responds, 503 otherwise.
-- `POST /messages` — write one message. Body: `{"topic": "...", "payload": <any>, "qos"?: 0|1|2}` → `201 {"id", "receivedAt"}`.
-- `POST /messages/batch` — write many messages atomically. Body: `{"messages": [{"topic", "payload"}, ...]}` → `201 {"inserted": n}`.
-- `GET /messages` — list newest first. Query params: `source=mqtt|http`, `topic=...`,
-  `since=<ISO 8601>`, `limit=1..1000` (default 100).
 - `GET /row-counts` — row count of every table in the service schema.
   → `{"schema", "tables": [{"table", "count"}...], "total"}`.
 - `POST /switchbot` — SwitchBot-scanner readings. Body: `{"mac": "DD:42:05:86:36:8A",
-  "temperature_c"?: n, "humidity"?: n, ...}`. The MAC is looked up (case-insensitive)
+"temperature_c"?: n, "humidity"?: n, ...}`. The MAC is looked up (case-insensitive)
   against `device.external_id`; when the device is registered, `temperature_c`/`humidity`
   are appended to the existing `temperature`/`humidity` tables keyed by device id
   (→ `201 {"deviceId", "temperature", "humidity"}`), otherwise nothing is inserted
   (→ `404 {"error": "unknown device: <mac>"}`).
 - `GET /:table/list?limit=N` — rows from any table in the schema (e.g.
-  `/messages/list?limit=10`). `limit` 1..1000, default 100. 404 for unknown
+  `/power/list?limit=10`). `limit` 1..1000, default 100. 404 for unknown
   tables (the name is whitelist-validated against the schema before use).
   → `{"table", "count": <rows returned>, "limit", "rows": [...]}`.
 - `GET /:table/count` — row count of one table. → `{"table", "count"}`.
 
 ## Configuration (environment variables)
 
-| Variable         | Default                  | Purpose                         |
-| ---------------- | ------------------------ | ------------------------------- |
-| `PORT`           | `8401`                   | HTTP listener port              |
-| `MQTT_PORT`      | `1883`                   | Embedded MQTT broker listener port |
-| `DB_MODE`        | `postgres`               | `postgres` or `memory` (pg-mem) |
-| `PGHOST`         | `localhost`              | Postgres host                   |
-| `PGPORT`         | `5432`                   | Postgres port                 |
-| `PGDATABASE`     | `messages`               | Postgres database             |
-| `PGUSER`         | `postgres`               | Postgres user                 |
-| `PGPASSWORD`     | `postgres`               | Postgres password             |
+| Variable     | Default     | Purpose                            |
+| ------------ | ----------- | ---------------------------------- |
+| `PORT`       | `8401`      | HTTP listener port                 |
+| `MQTT_PORT`  | `1883`      | Embedded MQTT broker listener port |
+| `DB_MODE`    | `postgres`  | `postgres` or `memory` (pg-mem)    |
+| `PGHOST`     | `localhost` | Postgres host                      |
+| `PGPORT`     | `5432`      | Postgres port                      |
+| `PGDATABASE` | `messages`  | Postgres database                  |
+| `PGUSER`     | `postgres`  | Postgres user                      |
+| `PGPASSWORD` | `postgres`  | Postgres password                  |
 
 Copy `env.example` to `.env` to override; everything defaults to local services.
 
@@ -126,7 +112,7 @@ Notes:
 - `npm run init-db` is **optional** now (the server creates tables on boot);
   it is still useful to create the database/user ahead of time in prod.
 - The service runs **two listeners**: the HTTP app on `PORT` and the embedded
-  aedes MQTT broker on `MQTT_PORT`. MQTT persistence failures are logged
+  aedes MQTT broker on `MQTT_PORT`. MQTT processing failures are logged
   per-message without crashing the process. SIGINT/SIGTERM trigger a
   graceful shutdown (broker close → pool close).
 - **Testing without real services:** `npm run dev` + `npm run test:mqtt` /
@@ -151,7 +137,7 @@ Notes:
 - **Error handling convention:** per-message failures are logged and skipped
   (the broker keeps serving); request failures return 4xx/5xx JSON
   (`{"error": "..."}`). Never let a single bad message crash the process.
-- **Batch inserts** use a single transaction (`insertMessages`) — either all
-  messages persist or none.
+- **Multi-row inserts** (e.g. a SwitchBot reading with both temperature and
+  humidity) use a single transaction — either all rows persist or none.
 - When adding endpoints, validate inputs explicitly and return 400 with a
   descriptive `error` message on bad input.

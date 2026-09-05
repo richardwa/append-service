@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 // Sends temperature (and humidity) readings to the service's HTTP endpoint,
-// simulating a sensor like a Tasmota/temp sensor reporting over HTTP.
+// simulating a SwitchBot-scanner sensor reporting over HTTP.
 //
 // Usage:
 //   node scripts/send-temperature.mjs                 # send one reading, exit
 //   node scripts/send-temperature.mjs --interval 5    # send every 5s until Ctrl-C
 //   node scripts/send-temperature.mjs --count 10      # send 10 readings, 1s apart
-//   node scripts/send-temperature.mjs --location attic
+//   node scripts/send-temperature.mjs --mac DD:42:05:86:36:8A
 //
 // Env: BASE_URL (default http://localhost:3000)
 
 // --- simple arg parsing ------------------------------------------------------
 function argValue(flag, fallback) {
   const i = process.argv.indexOf(flag);
-  return i !== -1 && process.argv[i + 1] !== undefined ? process.argv[i + 1] : fallback;
+  return i !== -1 && process.argv[i + 1] !== undefined
+    ? process.argv[i + 1]
+    : fallback;
 }
 const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
-const location = argValue("--location", "living-room");
+const mac = argValue("--mac", "DD:42:05:86:36:8A");
 const intervalSec = Number(argValue("--interval", 0)); // 0 = no loop
 const count = Number(argValue("--count", intervalSec > 0 ? Infinity : 1));
 const delaySec = intervalSec > 0 ? intervalSec : 1;
@@ -29,21 +31,19 @@ function nextReading() {
   celsius = Math.min(35, Math.max(12, celsius + (Math.random() - 0.5) * 0.6));
   humidity = Math.min(90, Math.max(25, humidity + (Math.random() - 0.5) * 2));
   return {
-    Time: new Date().toISOString().slice(0, 19),
-    DS18B20: { Temperature: Math.round(celsius * 10) / 10 },
-    DHT11: { Temperature: Math.round(celsius * 10) / 10, Humidity: Math.round(humidity), DewPoint: Math.round((celsius - (100 - humidity) / 5) * 10) / 10 },
-    TempUnit: "C",
-    location,
+    mac,
+    temperature_c: Math.round(celsius * 10) / 10,
+    humidity: Math.round(humidity),
   };
 }
 
 async function send() {
   const payload = nextReading();
   try {
-    const res = await fetch(`${baseUrl}/messages`, {
+    const res = await fetch(`${baseUrl}/switchbot`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ topic: `sensors/temperature/${location}`, payload }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -53,7 +53,7 @@ async function send() {
     }
     const body = await res.json();
     console.log(
-      `[temp-sim] sent ${payload.DS18B20.Temperature} °C, ${payload.DHT11.Humidity} % RH (${payload.location}) -> id ${body.id}`,
+      `[temp-sim] sent ${payload.temperature_c} °C, ${payload.humidity} % RH (${payload.mac}) -> device ${body.deviceId}`,
     );
     return true;
   } catch (err) {

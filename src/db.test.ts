@@ -8,8 +8,6 @@ import {
   getDeviceIdByMac,
   getRowCounts,
   initDb,
-  insertMessage,
-  insertMessages,
   insertPowerReading,
   insertSwitchbotReading,
   listTables,
@@ -18,91 +16,55 @@ import {
 } from "./db.js";
 
 test(
-  "in-memory db: schema init, insert, batch, read-back",
+  "in-memory db: schema init, device read-back helpers, row counts",
   { timeout: 15_000 },
   async (t) => {
     await initDb();
     t.after(() => close());
+    const schema = config.postgres.schema;
 
-    // Single insert with a JSON string payload (stored as JSONB)
-    const one = await insertMessage({
-      source: "mqtt",
-      topic: "sensors/temp",
-      payload: '{"celsius": 21.5}',
-      qos: 1,
-      retained: false,
-    });
-    assert.ok(one.id > 0);
-    assert.ok(one.receivedAt instanceof Date);
-
-    // Non-JSON payload survives as a JSON string scalar
-    const raw = await insertMessage({
-      source: "http",
-      topic: "raw",
-      payload: "not json at all",
-    });
-    assert.ok(raw.id > one.id);
-
-    // Transactional batch insert
-    const inserted = await insertMessages([
-      { source: "mqtt", topic: "sensors/hum", payload: { pct: 40 }, qos: 0 },
-      { source: "http", topic: "sensors/co2", payload: { ppm: 620 } },
-    ]);
-    assert.equal(inserted, 2);
-
-    // Read back through the same SQL the API uses
-    const result = await query<{
-      id: number;
-      source: string;
-      topic: string;
-      payload: unknown;
-    }>(
-      `SELECT id, source, topic, payload FROM ${config.postgres.schema}.messages ORDER BY id`,
+    // Register devices like the production device table does
+    await query(
+      `INSERT INTO ${schema}.device (name, type, external_id, location)
+       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert')`,
     );
-    assert.equal(result.rows.length, 4);
+    await query(
+      `INSERT INTO ${schema}.device (name, type, external_id)
+       VALUES ('SwitchBot1', 'SwitchBot', 'DD:42:05:86:36:8A')`,
+    );
 
-    const temp = result.rows[0];
-    assert.ok(temp);
-    assert.equal(temp.topic, "sensors/temp");
-    assert.deepEqual(temp.payload, { celsius: 21.5 }); // parsed to JSONB
+    // Device lookups used by both ingestion paths
+    assert.equal(await getDeviceIdByLocation("albert"), 1);
+    assert.equal(await getDeviceIdByLocation("tesla"), null); // unknown
+    assert.equal(await getDeviceIdByMac("dd:42:05:86:36:8a"), 2);
+    assert.equal(await getDeviceIdByMac("11:22:33:44:55:66"), null);
 
-    const rawRow = result.rows[1];
-    assert.ok(rawRow);
-    assert.equal(rawRow.payload, "not json at all");
+    // Append a power reading through the same helper the broker uses
+    const deviceId = await getDeviceIdByLocation("Albert");
+    assert.ok(deviceId);
+    await insertPowerReading(deviceId!, 42);
 
-    const hum = result.rows[2];
-    assert.ok(hum);
-    assert.deepEqual(hum.payload, { pct: 40 });
-
-    // Empty batch is a no-op
-    assert.equal(await insertMessages([]), 0);
-
-    // Row counts reflect the inserts (4 messages in one table)
+    // Row counts reflect the insert
     const counts = await getRowCounts();
     assert.ok(counts.length >= 1);
-    const messages = counts.find((c) => c.table === "messages");
-    assert.ok(messages);
-    assert.equal(messages.count, 4);
+    const power = counts.find((c) => c.table === "power");
+    assert.ok(power);
+    assert.equal(power.count, 1);
 
     // Per-table helpers back the generic /:table/count and /:table/list routes
     assert.deepEqual(await listTables(), [
-      "messages",
       "device",
       "temperature",
       "humidity",
       "power",
     ]);
-    assert.equal(await countTableRows("messages"), 4);
-    const rows = await listTableRows("messages", 2);
-    assert.equal(rows.length, 2);
+    assert.equal(await countTableRows("power"), 1);
+    const rows = await listTableRows("power", 2);
+    assert.equal(rows.length, 1);
     assert.deepEqual(Object.keys(rows[0] as Record<string, unknown>).sort(), [
-      "id",
-      "payload",
-      "qos",
-      "received_at",
-      "retained",
-      "source",
-      "topic",
+      "device_id",
+      "time",
+      "watts",
     ]);
   },
 );

@@ -1,11 +1,7 @@
 import { Aedes } from "aedes";
 import net from "node:net";
 import { config } from "./config.js";
-import {
-  getDeviceIdByLocation,
-  insertMessage,
-  insertPowerReading,
-} from "./db.js";
+import { getDeviceIdByLocation, insertPowerReading } from "./db.js";
 import { debugLog } from "./log.js";
 
 let broker: Aedes | null = null;
@@ -28,17 +24,17 @@ export function topicMatches(topic: string, filter: string): boolean {
   return topicLevels.length === filterLevels.length;
 }
 
-/** True when the topic matches at least one configured persist filter. */
-function shouldPersist(topic: string): boolean {
+/** True when the topic matches at least one configured filter. */
+function shouldProcess(topic: string): boolean {
   return config.mqtt.topics.some((filter) => topicMatches(topic, filter));
 }
 
 /**
- * Record an ENERGY.Power reading from a persisted MQTT topic into the power
+ * Record an ENERGY.Power reading from a matching MQTT topic into the power
  * table. The topic's second segment (e.g. "Albert" in tele/Albert/SENSOR) is
  * matched case-insensitively against device.location; when no device is
- * registered the reading is skipped (the raw message is still archived in
- * messages). Failures are logged per-message; the broker keeps serving.
+ * registered the reading is skipped. Failures are logged per-message; the
+ * broker keeps serving.
  */
 async function recordPowerReading(
   topic: string,
@@ -72,7 +68,8 @@ async function recordPowerReading(
 /**
  * Start the embedded MQTT broker (aedes). The service IS the broker:
  * devices connect directly to config.mqtt.port (default 1883), and every
- * published message is persisted.
+ * published message matching a configured topic filter is processed into
+ * the power table.
  */
 export async function startBroker(): Promise<net.Server> {
   const aedes = await Aedes.createBroker();
@@ -90,31 +87,19 @@ export async function startBroker(): Promise<net.Server> {
     console.error(`[mqtt] client error (${client.id}):`, err.message);
   });
 
-  // Persist every message published by a client that matches a configured
+  // Process every message published by a client that matches a configured
   // topic filter (default: tele/+/SENSOR power telemetry); all other MQTT
   // messages are ignored. Failures are logged per-message; the broker keeps
   // serving (a single bad message never crashes the process).
   aedes.on("publish", (packet, client) => {
     if (!client) return; // internal publish, e.g. $SYS topics
-    if (!shouldPersist(packet.topic)) {
+    if (!shouldProcess(packet.topic)) {
       console.log(`[mqtt] ignored (no filter match): ${packet.topic}`);
       return;
     }
     debugLog(
       `[mqtt] message body: ${packet.topic} -> ${packet.payload.toString("utf8")}`,
     );
-    insertMessage({
-      source: "mqtt",
-      topic: packet.topic,
-      payload: packet.payload.toString("utf8"),
-      qos: packet.qos,
-      retained: packet.retain,
-    }).catch((err: unknown) => {
-      console.error(
-        `[mqtt] failed to persist message on "${packet.topic}":`,
-        err,
-      );
-    });
     void recordPowerReading(packet.topic, packet.payload.toString("utf8"));
   });
 

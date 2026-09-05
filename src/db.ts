@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { config } from "./config.js";
-import type { IncomingMessage } from "./types.js";
 
 let pool: pg.Pool | null = null;
 
@@ -58,7 +57,7 @@ export async function initDb(): Promise<void> {
     // In postgres mode the schema is owned by the my-db deployment init
     // scripts (this user has no CREATE privilege); nothing to apply here.
     console.log(
-      `[db] schema ${config.postgres.schema}.messages assumed to exist (managed by my-db init)`,
+      `[db] schema ${config.postgres.schema} (device/temperature/humidity/power) assumed to exist (managed by my-db init)`,
     );
   }
 }
@@ -104,7 +103,6 @@ export async function listTables(): Promise<string[]> {
   if (tables.rows.length === 0) {
     tables = {
       rows: [
-        { table_name: "messages" },
         { table_name: "device" },
         { table_name: "temperature" },
         { table_name: "humidity" },
@@ -184,76 +182,6 @@ export async function query<T extends pg.QueryResultRow>(
   return getPool().query<T>(text, params);
 }
 
-const INSERT_SQL = `
-  INSERT INTO ${config.postgres.schema}.messages (source, topic, payload, qos, retained)
-  VALUES ($1, $2, $3, $4, $5)
-  RETURNING id, received_at
-`;
-
-/**
- * Coerce a payload for JSONB storage: JSON strings are parsed into real
- * JSON values; non-JSON strings are JSON-stringified so they are stored
- * as a JSON string scalar (a bare string would fail the jsonb cast).
- */
-function coercePayload(payload: unknown): unknown {
-  if (typeof payload === "string") {
-    try {
-      return JSON.parse(payload) as unknown;
-    } catch {
-      return JSON.stringify(payload);
-    }
-  }
-  return payload;
-}
-
-/**
- * Persist a single message. Payload is stored as JSONB when it is valid
- * JSON; anything else is stored as a JSON string scalar so no data is
- * ever dropped.
- */
-export async function insertMessage(
-  msg: IncomingMessage,
-): Promise<{ id: number; receivedAt: Date }> {
-  const result = await query<{ id: number; received_at: Date }>(INSERT_SQL, [
-    msg.source,
-    msg.topic,
-    coercePayload(msg.payload),
-    msg.qos ?? null,
-    msg.retained ?? false,
-  ]);
-
-  const row = result.rows[0];
-  if (!row) throw new Error("Insert returned no rows");
-  return { id: row.id, receivedAt: row.received_at };
-}
-
-/** Persist a batch of messages in a single transaction. */
-export async function insertMessages(
-  batch: IncomingMessage[],
-): Promise<number> {
-  if (batch.length === 0) return 0;
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    for (const msg of batch) {
-      await client.query(INSERT_SQL, [
-        msg.source,
-        msg.topic,
-        coercePayload(msg.payload),
-        msg.qos ?? null,
-        msg.retained ?? false,
-      ]);
-    }
-    await client.query("COMMIT");
-    return batch.length;
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
 export async function close(): Promise<void> {
   if (!pool) return;
   const p = pool;
@@ -320,7 +248,7 @@ export interface SwitchbotInsertResult {
 
 /**
  * Append a SwitchBot reading to the existing temperature/humidity tables
- * (same tables the MQTT path and /messages feed). Each present value becomes
+ * (same tables the HTTP /switchbot path feeds). Each present value becomes
  * one row keyed by device_id; both inserts happen in a single transaction.
  * Returns which tables were written.
  */

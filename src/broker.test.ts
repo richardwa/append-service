@@ -38,7 +38,7 @@ test("topicMatches: MQTT wildcards", async () => {
 // --- end-to-end: publish over MQTT, only power telemetry reaches the DB ------
 
 test(
-  "broker persists only filtered topics to the db",
+  "broker records power only for filtered topics with registered devices",
   { timeout: 20_000 },
   async (t) => {
     const { startBroker, stopBroker } = await import("./broker.js");
@@ -56,6 +56,14 @@ test(
       await stopBroker();
       await close();
     });
+
+    // Register devices like the production device table does: the topic's
+    // second segment (e.g. "Albert") must match device.location.
+    await query(
+      `INSERT INTO ${config.postgres.schema}.device (name, type, external_id, location)
+       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert'),
+              ('Sonoff2', 'Sonoff', '08:F9:E0:63:B9:2E', 'tesla')`,
+    );
 
     const server = await startBroker();
     const address = server.address() as net.AddressInfo;
@@ -76,9 +84,9 @@ test(
         );
       });
 
-    await publish("tele/Albert/LWT", "Online"); // ignored
-    await publish("tele/tesla/STATE", '{"POWER":"ON"}'); // ignored
-    await publish("tasmota/discovery/08F9E063B92D/config", '{"t":"Albert"}'); // ignored
+    await publish("tele/Albert/LWT", "Online"); // ignored (no filter match)
+    await publish("tele/tesla/STATE", '{"POWER":"ON"}'); // ignored (no filter match)
+    await publish("tasmota/discovery/08F9E063B92D/config", '{"t":"Albert"}'); // ignored (no filter match)
     await publish(
       "tele/tesla/SENSOR",
       '{"Time":"2026-08-19T04:01:51","ENERGY":{"Total":5554.210,"Period":0,"Power":4,"Voltage":121,"Current":0.067}}',
@@ -92,18 +100,24 @@ test(
     await new Promise((resolve) => setTimeout(resolve, 250));
 
     const result = await query<{
-      topic: string;
-      payload: { ENERGY?: { Power?: number } };
+      location: string;
+      device_id: number;
+      watts: number;
     }>(
-      `SELECT topic, payload FROM ${config.postgres.schema}.messages ORDER BY id`,
+      `SELECT d.location, p.device_id, p.watts
+       FROM ${config.postgres.schema}.power p
+       JOIN ${config.postgres.schema}.device d ON d.id = p.device_id
+       ORDER BY p.watts`,
     );
 
-    // Only the two power telemetry messages were collected
+    // Only the two power telemetry messages were recorded, keyed by device
     assert.deepEqual(
-      result.rows.map((r) => r.topic),
-      ["tele/tesla/SENSOR", "tele/Albert/SENSOR"],
+      result.rows.map((r) => r.location),
+      ["Albert", "tesla"],
     );
-    assert.equal(result.rows[0]?.payload.ENERGY?.Power, 4);
-    assert.equal(result.rows[1]?.payload.ENERGY?.Power, 3);
+    assert.deepEqual(
+      result.rows.map((r) => r.watts),
+      [3, 4],
+    );
   },
 );
