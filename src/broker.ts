@@ -1,7 +1,7 @@
 import { Aedes } from "aedes";
 import net from "node:net";
 import { config } from "./config.js";
-import { getDeviceIdByLocation, insertPowerReading } from "./db.js";
+import { getDeviceIdByExternalId, insertPowerReading } from "./db.js";
 import { debugLog } from "./log.js";
 
 let broker: Aedes | null = null;
@@ -31,10 +31,10 @@ function shouldProcess(topic: string): boolean {
 
 /**
  * Record an ENERGY.Power reading from a matching MQTT topic into the power
- * table. The topic's second segment (e.g. "Albert" in tele/Albert/SENSOR) is
- * matched case-insensitively against device.location; when no device is
- * registered the reading is skipped. Failures are logged per-message; the
- * broker keeps serving.
+ * table. The topic's second segment (e.g. "08F9E063B92D" in
+ * tele/08F9E063B92D/SENSOR) is matched case-insensitively against
+ * device.external_id; when no device is registered the reading is skipped.
+ * Failures are logged per-message; the broker keeps serving.
  */
 async function recordPowerReading(
   topic: string,
@@ -48,12 +48,12 @@ async function recordPowerReading(
     const raw = parsed.ENERGY?.Power ?? parsed.Power;
     if (typeof raw !== "number" || !Number.isFinite(raw)) return;
 
-    const location = topic.split("/")[1];
-    if (!location) return;
-    const deviceId = await getDeviceIdByLocation(location);
+    const externalId = topic.split("/")[1];
+    if (!externalId) return;
+    const deviceId = await getDeviceIdByExternalId(externalId);
     if (deviceId === null) {
       debugLog(
-        `[mqtt] no device for location "${location}", watts not recorded`,
+        `[mqtt] no device for external_id "${externalId}", watts not recorded`,
       );
       return;
     }

@@ -18,8 +18,9 @@ inserted for unregistered devices:
 
 - `POST /switchbot` — matches `device.external_id` (MAC, case-insensitive);
   inserts `temperature_c` → `temperature`, `humidity` → `humidity`.
-- MQTT `tele/<location>/SENSOR` — matches `device.location`
-  (case-insensitive); inserts `ENERGY.Power` → `power` (watts). Messages that
+- MQTT `tele/<external_id>/SENSOR` — matches `device.external_id`
+  (case-insensitive; Tasmota devices use `tasmota_<last 6 MAC digits>`, e.g.
+  `tasmota_63B92D`); inserts `ENERGY.Power` → `power` (watts). Messages that
   do not match a device (or don't contain `ENERGY.Power`) are ignored.
 
 ## Tech stack

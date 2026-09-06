@@ -6,7 +6,7 @@ import express, {
 import { config } from "./config.js";
 import {
   countTableRows,
-  getDeviceIdByMac,
+  getDeviceIdByExternalId,
   getRowCounts,
   insertSwitchbotReading,
   listTables,
@@ -120,7 +120,7 @@ app.post("/switchbot", async (req: Request, res: Response) => {
   }
 
   try {
-    const deviceId = await getDeviceIdByMac(mac);
+    const deviceId = await getDeviceIdByExternalId(mac);
     if (deviceId === null) {
       res.status(404).json({ error: `unknown device: ${mac}` });
       return;

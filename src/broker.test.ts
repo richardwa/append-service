@@ -58,11 +58,12 @@ test(
     });
 
     // Register devices like the production device table does: the topic's
-    // second segment (e.g. "Albert") must match device.location.
+    // second segment (e.g. "tasmota_63B92D", Tasmota's default topic id =
+    // last 6 MAC digits) must match device.external_id case-insensitively.
     await query(
       `INSERT INTO ${config.postgres.schema}.device (name, type, external_id, location)
-       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert'),
-              ('Sonoff2', 'Sonoff', '08:F9:E0:63:B9:2E', 'tesla')`,
+       VALUES ('Sonoff1', 'Sonoff', 'tasmota_63B92D', 'Albert'),
+              ('Sonoff2', 'Sonoff', 'tasmota_63B50E', 'TV')`,
     );
 
     const server = await startBroker();
@@ -85,14 +86,14 @@ test(
       });
 
     await publish("tele/Albert/LWT", "Online"); // ignored (no filter match)
-    await publish("tele/tesla/STATE", '{"POWER":"ON"}'); // ignored (no filter match)
+    await publish("tele/tasmota_63B92D/STATE", '{"POWER":"ON"}'); // ignored (no filter match)
     await publish("tasmota/discovery/08F9E063B92D/config", '{"t":"Albert"}'); // ignored (no filter match)
     await publish(
-      "tele/tesla/SENSOR",
+      "tele/tasmota_63b50e/SENSOR",
       '{"Time":"2026-08-19T04:01:51","ENERGY":{"Total":5554.210,"Period":0,"Power":4,"Voltage":121,"Current":0.067}}',
     );
     await publish(
-      "tele/Albert/SENSOR",
+      "tele/tasmota_63B92D/SENSOR",
       '{"Time":"2026-08-19T05:02:09","ENERGY":{"Total":136.088,"Period":0,"Power":3,"Voltage":117,"Current":0.078}}',
     );
 
@@ -100,11 +101,11 @@ test(
     await new Promise((resolve) => setTimeout(resolve, 250));
 
     const result = await query<{
-      location: string;
+      external_id: string;
       device_id: number;
       watts: number;
     }>(
-      `SELECT d.location, p.device_id, p.watts
+      `SELECT d.external_id, p.device_id, p.watts
        FROM ${config.postgres.schema}.power p
        JOIN ${config.postgres.schema}.device d ON d.id = p.device_id
        ORDER BY p.watts`,
@@ -112,8 +113,8 @@ test(
 
     // Only the two power telemetry messages were recorded, keyed by device
     assert.deepEqual(
-      result.rows.map((r) => r.location),
-      ["Albert", "tesla"],
+      result.rows.map((r) => r.external_id),
+      ["tasmota_63B92D", "tasmota_63B50E"],
     );
     assert.deepEqual(
       result.rows.map((r) => r.watts),

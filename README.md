@@ -18,14 +18,14 @@ A TypeScript Node server that ingests device readings from **MQTT** and **HTTP**
 
 ## How it works
 
-- **MQTT path:** the embedded broker (aedes) accepts devices on `MQTT_PORT` (default 1883); messages matching the configured topic filters (default `tele/+/SENSOR`) are parsed and `ENERGY.Power` is appended to the `power` table (gated by `device.location`); failures are logged per-message without crashing.
+- **MQTT path:** the embedded broker (aedes) accepts devices on `MQTT_PORT` (default 1883); messages matching the configured topic filters (default `tele/+/SENSOR`) are parsed and `ENERGY.Power` is appended to the `power` table (gated by `device.external_id`, e.g. Tasmota's `tasmota_<last 6 MAC digits>`); failures are logged per-message without crashing.
 - **HTTP path:**
   - `POST /switchbot` — SwitchBot-scanner readings, gated by `device.external_id` (MAC)
   - `GET /row-counts` — row count of every table in the schema
   - `GET /:table/list?limit=N` — rows from any schema table (limit 1..1000, default 100)
   - `GET /:table/count` — row count of one table
   - `GET /health` — 200 if DB reachable, 503 otherwise
-- **Device gating:** nothing is inserted for unregistered devices — the source is looked up in the `device` table first (MAC for `/switchbot`, location for MQTT).
+- **Device gating:** nothing is inserted for unregistered devices — the source is looked up in the `device` table first (`device.external_id` for both paths: the MAC from `/switchbot`, the Tasmota topic id from MQTT).
 - **Schema is created automatically on server start** (idempotent `IF NOT EXISTS` DDL from `scripts/init.sql`).
 - **Embedded in-memory DB:** with `DB_MODE=memory` the `pg` pool is replaced by [pg-mem](https://github.com/oguimbal/pg-mem) — the same SQL runs, no Postgres needed for dev/testing.
 

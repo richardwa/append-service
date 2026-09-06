@@ -190,35 +190,21 @@ export async function close(): Promise<void> {
 }
 
 /**
- * Look up a device id by MAC address. Matches case-insensitively against
- * device.external_id (production stores MACs like "DD:42:05:86:36:8A").
- * Returns null when no device is registered for the MAC.
+ * Look up a device id by external identifier. Matches case-insensitively
+ * against device.external_id — production stores MACs like
+ * "DD:42:05:86:36:8A" and Tasmota-style topic ids like "08F9E063B92D".
+ * Both ingestion paths use this: the MAC from POST /switchbot and the topic's
+ * second segment from tele/<id>/SENSOR MQTT telemetry.
+ * Returns null when no device is registered for the identifier.
  */
-export async function getDeviceIdByMac(mac: string): Promise<number | null> {
+export async function getDeviceIdByExternalId(
+  externalId: string,
+): Promise<number | null> {
   const result = await query<{ id: string }>(
     `SELECT id FROM ${config.postgres.schema}.device
      WHERE upper(external_id) = upper($1)
      LIMIT 1`,
-    [mac],
-  );
-  const raw = result.rows[0]?.id;
-  return raw === undefined ? null : Number(raw);
-}
-
-/**
- * Look up a device id by location name (case-insensitive). The MQTT path
- * uses this: Tasmota publishes to tele/<location>/SENSOR and device.location
- * holds the same name (e.g. "Albert", stored with any capitalization).
- * Returns null when no device is registered for the location.
- */
-export async function getDeviceIdByLocation(
-  location: string,
-): Promise<number | null> {
-  const result = await query<{ id: string }>(
-    `SELECT id FROM ${config.postgres.schema}.device
-     WHERE lower(location) = lower($1)
-     LIMIT 1`,
-    [location],
+    [externalId],
   );
   const raw = result.rows[0]?.id;
   return raw === undefined ? null : Number(raw);

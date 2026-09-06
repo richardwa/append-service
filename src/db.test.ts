@@ -4,8 +4,7 @@ import { config } from "./config.js";
 import {
   close,
   countTableRows,
-  getDeviceIdByLocation,
-  getDeviceIdByMac,
+  getDeviceIdByExternalId,
   getRowCounts,
   initDb,
   insertPowerReading,
@@ -26,21 +25,21 @@ test(
     // Register devices like the production device table does
     await query(
       `INSERT INTO ${schema}.device (name, type, external_id, location)
-       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert')`,
+       VALUES ('Sonoff1', 'Sonoff', 'tasmota_63B92D', 'Albert')`,
     );
     await query(
       `INSERT INTO ${schema}.device (name, type, external_id)
        VALUES ('SwitchBot1', 'SwitchBot', 'DD:42:05:86:36:8A')`,
     );
 
-    // Device lookups used by both ingestion paths
-    assert.equal(await getDeviceIdByLocation("albert"), 1);
-    assert.equal(await getDeviceIdByLocation("tesla"), null); // unknown
-    assert.equal(await getDeviceIdByMac("dd:42:05:86:36:8a"), 2);
-    assert.equal(await getDeviceIdByMac("11:22:33:44:55:66"), null);
+    // Device lookup used by both ingestion paths (external_id, case-insensitive):
+    // Tasmota devices use tasmota_<last 6 MAC digits>, SwitchBots keep the MAC.
+    assert.equal(await getDeviceIdByExternalId("tasmota_63b92d"), 1);
+    assert.equal(await getDeviceIdByExternalId("dd:42:05:86:36:8a"), 2);
+    assert.equal(await getDeviceIdByExternalId("tasmota_000000"), null); // unknown
 
     // Append a power reading through the same helper the broker uses
-    const deviceId = await getDeviceIdByLocation("Albert");
+    const deviceId = await getDeviceIdByExternalId("TASMOTA_63B92D");
     assert.ok(deviceId);
     await insertPowerReading(deviceId!, 42);
 
@@ -83,11 +82,10 @@ test(
        VALUES ('SwitchBot1', 'SwitchBot', 'DD:42:05:86:36:8A')`,
     );
 
-    // Unknown MAC => lookup returns null, nothing inserted
-    assert.equal(await getDeviceIdByMac("11:22:33:44:55:66"), null);
-
+    // Unknown external_id => lookup returns null, nothing inserted
+    assert.equal(await getDeviceIdByExternalId("11:22:33:44:55:66"), null);
     // Known MAC (case-insensitive) => device id resolved
-    const deviceId = await getDeviceIdByMac("dd:42:05:86:36:8a");
+    const deviceId = await getDeviceIdByExternalId("dd:42:05:86:36:8a");
     assert.ok(deviceId);
 
     // Insert a reading with both temperature and humidity
@@ -128,7 +126,7 @@ test(
 );
 
 test(
-  "mqtt power reading: location lookup gates insert into power",
+  "mqtt power reading: external_id lookup gates insert into power",
   { timeout: 15_000 },
   async (t) => {
     await initDb();
@@ -137,15 +135,16 @@ test(
 
     await query(
       `INSERT INTO ${config.postgres.schema}.device (name, type, external_id, location)
-       VALUES ('Sonoff1', 'Sonoff', '08:F9:E0:63:B9:2D', 'Albert')`,
+       VALUES ('Sonoff1', 'Sonoff', 'tasmota_63B92D', 'Albert')`,
     );
 
-    // Case-insensitive location match, like the broker does for tele/Albert/SENSOR
-    const deviceId = await getDeviceIdByLocation("albert");
+    // Case-insensitive external_id match, like the broker does for
+    // tele/tasmota_63B92D/SENSOR
+    const deviceId = await getDeviceIdByExternalId("tasmota_63b92d");
     assert.ok(deviceId);
 
-    // Unknown location => null, nothing inserted
-    assert.equal(await getDeviceIdByLocation("tesla"), null);
+    // Unknown external_id => null, nothing inserted
+    assert.equal(await getDeviceIdByExternalId("tasmota_000000"), null);
 
     await insertPowerReading(deviceId!, 52);
     const rows = await query<{ device_id: number; watts: number }>(
